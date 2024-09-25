@@ -1,16 +1,18 @@
+mod create_popup;
+mod info_popup;
+
+use crate::info_popup::{Checkbox, InfoPopup};
 use chrono::Local;
 use color_eyre::Result;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use ratatui::layout::Flex;
 use ratatui::{
-    buffer::Buffer,
     crossterm::event::{self, Event, KeyCode, KeyEventKind},
     layout::{Constraint, Layout, Margin, Rect},
     style::{self, Color, Modifier, Style, Stylize},
     text::{Line, Text},
     widgets::{
-        Block, BorderType, Borders, Cell, Clear, HighlightSpacing, Paragraph, Row, Scrollbar,
-        ScrollbarOrientation, ScrollbarState, Table, TableState, Widget, Wrap,
+        Block, BorderType, Cell, HighlightSpacing, Paragraph, Row, Scrollbar,
+        ScrollbarOrientation, ScrollbarState, Table, TableState,
     },
     DefaultTerminal, Frame,
 };
@@ -25,7 +27,7 @@ const PALETTES: [tailwind::Palette; 4] = [
     tailwind::INDIGO,
     tailwind::RED,
 ];
-const INFO_TEXT: &str = "(Esc) quit | (↑) move up | (↓) move down | (→) next color | (←) previous color | (A) to add | (X) to delete | (N) to change progress state | (R) edit";
+const INFO_TEXT: &str = "(I) Info | (Esc) quit | (↑) move up | (↓) move down | (→) next color | (←) previous color";
 const ITEM_HEIGHT: usize = 4;
 const JSON_FILE_PATH: &str = "data.json";
 
@@ -76,7 +78,7 @@ struct Data {
     progress: Progress,
     created: String,
 }
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 enum Progress {
     InProgress,
     Waiting,
@@ -99,77 +101,33 @@ impl Default for Progress {
     }
 }
 
-#[derive(Debug, Default)]
-struct Popup<'a> {
-    title: Line<'a>,
-    name: String,
-    description: String,
-    border_style: Style,
-    title_style: Style,
-    style: Style,
-}
-
-impl Popup<'_> {
-    fn render(
-        self,
-        area: Rect,
-        buf: &mut Buffer,
-        input_focus: InputFocus,
-        selected_style_fg: Color,
-    ) {
-        Clear.render(area, buf);
-
-        let name_border_color = if input_focus == InputFocus::Name {
-            selected_style_fg
-        } else {
-            Color::White
-        };
-        let description_border_color = if input_focus == InputFocus::Description {
-            selected_style_fg
-        } else {
-            Color::White
-        };
-
-        // Render name input with title
-        let name_area = Rect::new(area.x, area.y, area.width, 3);
-        Paragraph::new(Text::from(self.name))
-            .wrap(Wrap { trim: true })
-            .style(self.style)
-            .block(
-                Block::new()
-                    .title("Name")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(name_border_color)),
-            )
-            .render(name_area, buf);
-
-        // Render description input with title
-        let description_area = Rect::new(area.x, area.y + 4, area.width, area.height - 4);
-        Paragraph::new(Text::from(self.description))
-            .wrap(Wrap { trim: true })
-            .style(self.style)
-            .block(
-                Block::new()
-                    .title("Description")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(description_border_color)),
-            )
-            .render(description_area, buf);
+impl Clone for Data {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            description: self.description.clone(),
+            progress: self.progress.clone(),
+            created: self.created.clone(),
+        }
     }
 }
 
-struct App {
+struct App<'a> {
     state: TableState,
-    items: Vec<Data>,
-    longest_item_lens: (u16, u16, u16, u16), // (name, description, progress, created)
+    items: Vec<Data>, // Original items loaded from JSON
+    filtered_items: Vec<Data>,
+    longest_item_lens: (u16, u16, u16, u16), // (name, information, progress, created)
     scroll_state: ScrollbarState,
     colors: TableColors,
     color_index: usize,
-    show_popup: bool,
+    show_create: bool,
+    show_info: bool,
     input_name: String,
     input_description: String,
     input_focus: InputFocus,
     editing_index: Option<usize>,
+    info_popup: InfoPopup<'a>,
+    hide_completed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -178,7 +136,7 @@ enum InputFocus {
     Description,
 }
 
-impl App {
+impl App<'_> {
     fn new() -> Self {
         let data_vec = read_json().unwrap_or_default();
         Self {
@@ -187,12 +145,120 @@ impl App {
             scroll_state: ScrollbarState::new(data_vec.len().saturating_sub(1) * ITEM_HEIGHT),
             colors: TableColors::new(&PALETTES[0]),
             color_index: 0,
-            items: data_vec,
-            show_popup: false,
+            items: data_vec.clone(),  // Original items
+            filtered_items: data_vec, // Initially display all items
+            show_create: false,
+            show_info: false,
             input_name: String::new(),
             input_description: String::new(),
             input_focus: InputFocus::Name,
             editing_index: None,
+            info_popup: InfoPopup {
+                title: Line::from("Rust-Tui"),
+                name: "By: Jacob Jørgensen | Github: Zelvios".to_string(),
+                information: INFO_TEXT.to_string(),
+                checkboxes: vec![
+                    Checkbox {
+                        label: "Hide Completed".to_string(),
+                        checked: false,
+                    },
+                    Checkbox {
+                        label: "Lock Color".to_string(),
+                        checked: false,
+                    },
+                    Checkbox {
+                        label: "....".to_string(),
+                        checked: false,
+                    },
+                ],
+                style: Style::default().fg(Color::White),
+                selected_checkbox: 0, // Initialize selected checkbox
+            },
+            hide_completed: false,
+        }
+    }
+
+    fn get_filtered_items(&self) -> Vec<&Data> {
+        if self.hide_completed {
+            self.items
+                .iter()
+                .filter(|item| item.progress != Progress::Done)
+                .collect() // Filter out completed items
+        } else {
+            self.items.iter().collect() // Keep all items if not hiding
+        }
+    }
+    fn item_matches(item: &Data, selected_item: &Data) -> bool {
+        item.name == selected_item.name &&
+            item.description == selected_item.description &&
+            item.progress == selected_item.progress &&
+            item.created == selected_item.created
+    }
+    fn toggle_info(&mut self) {
+        self.show_info = !self.show_info;
+    }
+
+    fn handle_info_input(&mut self, key: KeyCode) {
+        let checkboxes = &mut self.info_popup.checkboxes; // Access checkboxes from the info_popup
+
+        match key {
+            KeyCode::Down => {
+                if !checkboxes.is_empty() {
+                    self.info_popup.selected_checkbox =
+                        (self.info_popup.selected_checkbox + 1) % checkboxes.len();
+                }
+            }
+            KeyCode::Up => {
+                if !checkboxes.is_empty() {
+                    self.info_popup.selected_checkbox =
+                        (self.info_popup.selected_checkbox + checkboxes.len() - 1)
+                            % checkboxes.len();
+                }
+            }
+            KeyCode::Left => {
+                // Logic for left arrow key
+                if self.info_popup.selected_checkbox > 0 {
+                    self.info_popup.selected_checkbox -= 1;
+                } else {
+                    self.info_popup.selected_checkbox = checkboxes.len() - 1; // Wrap around to the last checkbox
+                }
+            }
+            KeyCode::Right => {
+                // Logic for right arrow key
+                if self.info_popup.selected_checkbox < checkboxes.len() - 1 {
+                    self.info_popup.selected_checkbox += 1;
+                } else {
+                    self.info_popup.selected_checkbox = 0; // Wrap around to the first checkbox
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(checkbox) = checkboxes.get_mut(self.info_popup.selected_checkbox) {
+                    checkbox.checked = !checkbox.checked;
+
+                    if checkbox.label == "Hide Completed" {
+                        self.hide_completed = checkbox.checked;
+
+                        // Update filtered items
+                        if self.hide_completed {
+                            self.filtered_items = self
+                                .items
+                                .iter()
+                                .filter(|item| item.progress != Progress::Done)
+                                .cloned()
+                                .collect();
+                        } else {
+                            self.filtered_items = self.items.clone();
+                        }
+
+                        // Recalculate longest item lengths
+                        self.longest_item_lens = constraint_len_calculator(&self.filtered_items);
+
+                        // Ensure the selection is valid
+                        self.update_selected_index();
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -204,23 +270,28 @@ impl App {
             created: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
         }
     }
-    
-    fn toggle_popup(&mut self) {
-        self.show_popup = !self.show_popup;
 
-        if self.show_popup {
+    fn toggle_create(&mut self) {
+        self.show_create = !self.show_create;
+
+        if self.show_create {
+            // Clear fields every time the popup is opened
+            self.input_name.clear();
+            self.input_description.clear();
+
             if let Some(index) = self.editing_index {
+                // Load the existing item's data if editing
                 self.input_name = self.items[index].name.clone();
                 self.input_description = self.items[index].description.clone();
-                self.input_focus = InputFocus::Name; // Set focus to the name field by default
-            } else {
-                // Clear fields if creating a new todo
-                self.input_name.clear();
-                self.input_description.clear();
             }
+
+            // Set focus to the name field by default
             self.input_focus = InputFocus::Name;
         } else {
-            self.editing_index = None; // Reset when closing
+            // When closing the popup, reset the editing index and clear the input fields
+            self.editing_index = None; // Reset the editing index when closing
+            self.input_name.clear();
+            self.input_description.clear();
         }
     }
 
@@ -237,7 +308,7 @@ impl App {
             panic!("Error saving JSON: {e}")
         }
 
-        self.toggle_popup();
+        self.toggle_create();
     }
 
     fn handle_popup_input(&mut self, key: KeyCode) {
@@ -265,20 +336,18 @@ impl App {
                     }
                 }
             },
-            KeyCode::Tab => {
-                // Toggle focus between Name and Description on Tab press
+            KeyCode::Enter => {
+                if self.input_focus == InputFocus::Description {
+                    self.add_item(); // Save and close the popup
+                } else {
+                    self.input_focus = InputFocus::Description;
+                }
+            }
+            KeyCode::Tab if !self.show_info => {
                 self.input_focus = match self.input_focus {
                     InputFocus::Name => InputFocus::Description,
                     InputFocus::Description => InputFocus::Name,
                 };
-            }
-            KeyCode::Enter => {
-                // Check if we should save the item
-                if self.input_focus == InputFocus::Description {
-                    self.add_item(); // Save and close the popup
-                } else {
-                    self.input_focus = InputFocus::Description; // Move focus to description
-                }
             }
             _ => {}
         }
@@ -330,18 +399,32 @@ impl App {
     fn delete(&mut self) {
         if let Some(selected) = self.state.selected() {
             if !self.items.is_empty() {
-                self.items.remove(selected);
+                let filtered_items = self.get_filtered_items();
 
-                let new_index = if selected >= self.items.len() {
-                    self.items.len().saturating_sub(1)
-                } else {
-                    selected
-                };
-                self.state.select(Some(new_index));
-                self.scroll_state = self.scroll_state.position(new_index * ITEM_HEIGHT);
+                // Ensure the selected index is valid for the filtered items
+                if selected < filtered_items.len() {
+                    let selected_item = filtered_items[selected];
 
-                if let Err(e) = save_json(&self.items) {
-                    eprintln!("Error saving JSON: {e}");
+                    if let Some(index) = self.items.iter().position(|item| {
+                        item.name == selected_item.name &&
+                            item.description == selected_item.description &&
+                            item.progress == selected_item.progress &&
+                            item.created == selected_item.created
+                    }) {
+                        self.items.remove(index);
+
+                        let new_index = if index >= self.items.len() {
+                            self.items.len().saturating_sub(1)
+                        } else {
+                            index
+                        };
+                        self.state.select(Some(new_index));
+                        self.scroll_state = self.scroll_state.position(new_index * ITEM_HEIGHT);
+
+                        if let Err(e) = save_json(&self.items) {
+                            eprintln!("Error saving JSON: {e}");
+                        }
+                    }
                 }
             }
         }
@@ -353,34 +436,66 @@ impl App {
 
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    if self.show_popup {
+                    if self.show_create {
                         match key.code {
-                            KeyCode::Esc => self.show_popup = false,
+                            KeyCode::Esc => self.show_create = false,
                             KeyCode::Enter => {
                                 if self.input_focus == InputFocus::Description {
                                     self.save_item(); // Save and close the popup
                                 } else {
-                                    self.input_focus = InputFocus::Description; // Move focus to description
+                                    self.input_focus = InputFocus::Description;
                                 }
                             }
                             _ => {
-                                // Call the new handle_popup_input function
                                 self.handle_popup_input(key.code);
                             }
+                        }
+                    } else if self.show_info {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('i') => self.show_info = false,
+                            _ => self.handle_info_input(key.code), // Handle input for the info popup
                         }
                     } else {
                         match key.code {
                             KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                             KeyCode::Char('j') | KeyCode::Down => self.next(),
                             KeyCode::Char('k') | KeyCode::Up => self.previous(),
-                            KeyCode::Char('l') | KeyCode::Right => self.next_color(),
-                            KeyCode::Char('h') | KeyCode::Left => self.previous_color(),
+                            KeyCode::Char('l') | KeyCode::Right => {
+                                let lock_color_checked = Option::unwrap_or(self
+                                                                               .info_popup
+                                                                               .checkboxes
+                                                                               .iter()
+                                                                               .find(|checkbox| checkbox.label == "Lock Color")
+                                                                               .map(|checkbox| checkbox.checked), false);
+                                if !lock_color_checked {
+                                    self.next_color();
+                                }
+                            }
+                            KeyCode::Char('h') | KeyCode::Left => {
+                                let lock_color_checked = Option::unwrap_or(self
+                                                                               .info_popup
+                                                                               .checkboxes
+                                                                               .iter()
+                                                                               .find(|checkbox| checkbox.label == "Lock Color")
+                                                                               .map(|checkbox| checkbox.checked), false);
+                                if !lock_color_checked {
+                                    self.previous_color();
+                                }
+                            }
                             KeyCode::Char('x') | KeyCode::Delete => self.delete(),
-                            KeyCode::Char('r') => self.edit_item(),
+                            KeyCode::Char('i') => self.toggle_info(),
+                            KeyCode::Char('r') => {
+                                self.edit_item(); // Call edit item logic
+                            }
                             KeyCode::Char('a') => {
-                                self.toggle_popup();
+                                self.editing_index = None;
+                                self.toggle_create(); // Toggle create popup
                             }
                             KeyCode::Char('n') => self.next_progress(),
+                            KeyCode::Char('t') => {
+                                self.hide_completed = !self.hide_completed; // Toggle hiding
+                                self.update_selected_index(); // Ensure the selection is valid
+                            }
                             _ => {}
                         }
                     }
@@ -389,10 +504,35 @@ impl App {
         }
     }
 
+    fn update_selected_index(&mut self) {
+        let filtered_items = self.get_filtered_items();
+
+        // Check if the currently selected index is still valid
+        if let Some(selected) = self.state.selected() {
+            if selected >= filtered_items.len() {
+                // Reset selection to the first visible item if out of bounds
+                self.state.select(Some(0));
+            }
+        } else {
+            // If nothing is selected, default to the first item
+            self.state.select(Some(0));
+        }
+    }
     fn edit_item(&mut self) {
         if let Some(selected) = self.state.selected() {
-            self.editing_index = Some(selected); // Set the editing index to the selected todo
-            self.toggle_popup(); // Open the popup
+            let filtered_items = self.get_filtered_items();
+
+            // Ensure the selected index is valid for the filtered items
+            if selected < filtered_items.len() {
+                let selected_item = filtered_items[selected];
+
+                if let Some(index) = self.items.iter().position(|item| {
+                    App::<'_>::item_matches(item, selected_item)
+                }) {
+                    self.editing_index = Some(index);
+                    self.toggle_create(); // Open the popup
+                }
+            }
         }
     }
 
@@ -401,7 +541,7 @@ impl App {
             return; // Don't save if the name is empty
         }
 
-        let item = self.create_item(); // Use the create_item method
+        let item = self.create_item();
 
         if let Some(index) = self.editing_index {
             // If editing an existing item, update it
@@ -417,20 +557,34 @@ impl App {
 
         // Reset the editing index and close the popup
         self.editing_index = None;
-        self.toggle_popup();
+        self.toggle_create();
     }
 
     fn next_progress(&mut self) {
         if let Some(selected) = self.state.selected() {
-            if let Some(item) = self.items.get_mut(selected) {
-                item.progress = match item.progress {
-                    Progress::InProgress => Progress::Waiting,
-                    Progress::Waiting => Progress::Done,
-                    Progress::Done => Progress::InProgress,
-                };
+            // Create a filtered list based on hide_completed flag
+            let filtered_items: Vec<&Data> = self.get_filtered_items();
 
-                if let Err(e) = save_json(&self.items) {
-                    eprintln!("Error saving JSON: {e}");
+            // Ensure the selected index is valid for the filtered items
+            if selected < filtered_items.len() {
+                // Get the selected item from the filtered list
+                let selected_item = filtered_items[selected];
+
+                // Find the index in the original items to compare
+                if let Some(original_index) = self.items.iter().position(|item| {
+                    App::<'_>::item_matches(item, selected_item)
+                }) {
+                    // Update the progress of the original item
+                    let item = &mut self.items[original_index];
+                    item.progress = match item.progress {
+                        Progress::InProgress => Progress::Waiting,
+                        Progress::Waiting => Progress::Done,
+                        Progress::Done => Progress::InProgress,
+                    };
+
+                    if let Err(e) = save_json(&self.items) {
+                        eprintln!("Error saving JSON: {e}");
+                    }
                 }
             }
         }
@@ -446,19 +600,26 @@ impl App {
         self.render_scrollbar(frame, rects[0]);
         self.render_footer(frame, rects[1]);
 
-        if self.show_popup {
-            let popup = Popup {
-                title: Line::from("Add Item"),
+        // Rendering the creation popup
+        if self.show_create {
+            let create = create_popup::CreatePopup {
                 name: self.input_name.clone(),
                 description: self.input_description.clone(),
-                border_style: Style::default().fg(Color::White),
-                title_style: Style::default().fg(Color::Cyan),
                 style: Style::default().fg(Color::White),
             };
-            popup.render(
+            create.render(
                 popup_area(area, 80, 30),
                 frame.buffer_mut(),
                 self.input_focus,
+                self.colors.selected_style_fg,
+            );
+        }
+
+        // Rendering the info popup
+        if self.show_info {
+            self.info_popup.render(
+                popup_area(area, 80, 30),
+                frame.buffer_mut(),
                 self.colors.selected_style_fg,
             );
         }
@@ -479,7 +640,23 @@ impl App {
             .style(header_style)
             .height(1);
 
-        let rows = self.items.iter().enumerate().map(|(i, data)| {
+        // Filter items based on hide_completed flag
+        let filtered_items: Vec<&Data> = if self.hide_completed {
+            self.items
+                .iter()
+                .filter(|item| item.progress != Progress::Done)
+                .collect()
+        } else {
+            self.items.iter().collect()
+        };
+
+        if let Some(selected_index) = self.state.selected() {
+            if selected_index >= filtered_items.len() {
+                self.state.select(Some(0));
+            }
+        }
+
+        let rows = filtered_items.iter().enumerate().map(|(i, data)| {
             let color = if i % 2 == 0 {
                 self.colors.normal_row_color
             } else {
@@ -489,7 +666,7 @@ impl App {
             let progress_text = progress_display.1; // Extract the text
             let progress_color = progress_display.0; // Extract the color
 
-            // Wrap both name and description if they exceed the specified lengths
+            // Wrap both name and information if they exceed the specified lengths
             let wrapped_name = wrap_text(&data.name, 22);
             let wrapped_description = wrap_text(&data.description, 42);
 
@@ -563,7 +740,7 @@ fn wrap_text(text: &str, max_len: usize) -> String {
         .chunks(max_len) // Split into chunks of max_len
         .map(|chunk| chunk.iter().collect::<String>()) // Collect each chunk back into a string
         .collect::<Vec<_>>() // Collect into a vector of lines
-        .join("\n") // Join lines with newlines
+        .join("\n")
 }
 
 fn constraint_len_calculator(items: &[Data]) -> (u16, u16, u16, u16) {
@@ -614,10 +791,11 @@ fn save_json(data: &[Data]) -> io::Result<()> {
     Ok(())
 }
 
-fn popup_area(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
-    let vertical = Layout::vertical([Constraint::Percentage(percent_y)]).flex(Flex::Center);
-    let horizontal = Layout::horizontal([Constraint::Percentage(percent_x)]).flex(Flex::Center);
-    let [area] = vertical.areas(area);
-    let [area] = horizontal.areas(area);
-    area
+fn popup_area(area: Rect, width: u16, height: u16) -> Rect {
+    Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y + (area.height - height) / 2,
+        width,
+        height,
+    )
 }
