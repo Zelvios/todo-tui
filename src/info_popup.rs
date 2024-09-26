@@ -17,12 +17,7 @@ pub struct InfoPopup<'a> {
     pub style: Style,
 }
 impl InfoPopup<'_> {
-    pub fn render(
-        &self,
-        area: Rect,
-        buf: &mut Buffer,
-        selected_style_fg: Color,
-    ) {
+    pub fn render(&self, area: Rect, buf: &mut Buffer, selected_style_fg: Color) {
         Clear.render(area, buf);
 
         let border_color = selected_style_fg;

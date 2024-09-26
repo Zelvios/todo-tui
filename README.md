@@ -1,8 +1,9 @@
 
 # Todo-Tui
 
-A Todo app designed with [ratatui.rs](https://ratatui.rs/)
+A simple Todo app designed with [ratatui.rs](https://ratatui.rs/)
 
+![todo-tui](img.png)
 
 ## Development
 

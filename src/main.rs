@@ -5,21 +5,21 @@ use crate::info_popup::{Checkbox, InfoPopup};
 use chrono::Local;
 use color_eyre::Result;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+use ratatui::text::Span;
 use ratatui::{
     crossterm::event::{self, Event, KeyCode, KeyEventKind},
     layout::{Constraint, Layout, Margin, Rect},
     style::{self, Color, Modifier, Style, Stylize},
     text::{Line, Text},
     widgets::{
-        Block, BorderType, Cell, HighlightSpacing, Paragraph, Row, Scrollbar,
-        ScrollbarOrientation, ScrollbarState, Table, TableState,
+        Block, BorderType, Cell, HighlightSpacing, Paragraph, Row, Scrollbar, ScrollbarOrientation,
+        ScrollbarState, Table, TableState,
     },
     DefaultTerminal, Frame,
 };
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{self, BufReader};
-use ratatui::text::Span;
 use style::palette::tailwind;
 
 const PALETTES: [tailwind::Palette; 4] = [
@@ -28,7 +28,7 @@ const PALETTES: [tailwind::Palette; 4] = [
     tailwind::INDIGO,
     tailwind::RED,
 ];
-const INFO_TEXT: &str = "(I) Info | (Esc) quit | (↑) move up | (↓) move down | (→) next color | (←) previous color";
+const INFO_TEXT: &str = "(I) Info | (Esc) quit";
 const ITEM_HEIGHT: usize = 4;
 const JSON_FILE_PATH: &str = "data.json";
 
@@ -155,14 +155,22 @@ impl App<'_> {
             input_focus: InputFocus::Name,
             editing_index: None,
             info_popup: InfoPopup {
-                title: Line::from("Rust-Tui"),
+                title: Line::from("Rust-TUI"),
                 information: Line::from(vec![
-                    Span::styled("By: Jacob Jørgensen | Github: Zelvios", Style::default().add_modifier( Modifier::ITALIC)),
+                    Span::styled(
+                        "By: Jacob Jørgensen | Github: Zelvios",
+                        Style::default().add_modifier(Modifier::ITALIC),
+                    ),
                     Span::from(""),
-                    Span::styled("Commands:", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Commands:",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::from("(I) info | (Esc) quit"),
                     Span::from("(A) create new todo | (X) delete todo | (R) edit todo"),
-                    Span::from("(↑) move up | (↓) move down | (→) next color | (←) previous color")
+                    Span::from("(↑) move up | (↓) move down | (→) next color | (←) previous color"),
                 ]),
                 checkboxes: vec![
                     Checkbox {
@@ -196,10 +204,10 @@ impl App<'_> {
         }
     }
     fn item_matches(item: &Data, selected_item: &Data) -> bool {
-        item.name == selected_item.name &&
-            item.description == selected_item.description &&
-            item.progress == selected_item.progress &&
-            item.created == selected_item.created
+        item.name == selected_item.name
+            && item.description == selected_item.description
+            && item.progress == selected_item.progress
+            && item.created == selected_item.created
     }
     fn toggle_info(&mut self) {
         self.show_info = !self.show_info;
@@ -413,10 +421,10 @@ impl App<'_> {
                     let selected_item = filtered_items[selected];
 
                     if let Some(index) = self.items.iter().position(|item| {
-                        item.name == selected_item.name &&
-                            item.description == selected_item.description &&
-                            item.progress == selected_item.progress &&
-                            item.created == selected_item.created
+                        item.name == selected_item.name
+                            && item.description == selected_item.description
+                            && item.progress == selected_item.progress
+                            && item.created == selected_item.created
                     }) {
                         self.items.remove(index);
 
@@ -468,23 +476,27 @@ impl App<'_> {
                             KeyCode::Char('j') | KeyCode::Down => self.next(),
                             KeyCode::Char('k') | KeyCode::Up => self.previous(),
                             KeyCode::Char('l') | KeyCode::Right => {
-                                let lock_color_checked = Option::unwrap_or(self
-                                                                               .info_popup
-                                                                               .checkboxes
-                                                                               .iter()
-                                                                               .find(|checkbox| checkbox.label == "Lock Color")
-                                                                               .map(|checkbox| checkbox.checked), false);
+                                let lock_color_checked = Option::unwrap_or(
+                                    self.info_popup
+                                        .checkboxes
+                                        .iter()
+                                        .find(|checkbox| checkbox.label == "Lock Color")
+                                        .map(|checkbox| checkbox.checked),
+                                    false,
+                                );
                                 if !lock_color_checked {
                                     self.next_color();
                                 }
                             }
                             KeyCode::Char('h') | KeyCode::Left => {
-                                let lock_color_checked = Option::unwrap_or(self
-                                                                               .info_popup
-                                                                               .checkboxes
-                                                                               .iter()
-                                                                               .find(|checkbox| checkbox.label == "Lock Color")
-                                                                               .map(|checkbox| checkbox.checked), false);
+                                let lock_color_checked = Option::unwrap_or(
+                                    self.info_popup
+                                        .checkboxes
+                                        .iter()
+                                        .find(|checkbox| checkbox.label == "Lock Color")
+                                        .map(|checkbox| checkbox.checked),
+                                    false,
+                                );
                                 if !lock_color_checked {
                                     self.previous_color();
                                 }
@@ -533,9 +545,11 @@ impl App<'_> {
             if selected < filtered_items.len() {
                 let selected_item = filtered_items[selected];
 
-                if let Some(index) = self.items.iter().position(|item| {
-                    App::<'_>::item_matches(item, selected_item)
-                }) {
+                if let Some(index) = self
+                    .items
+                    .iter()
+                    .position(|item| App::<'_>::item_matches(item, selected_item))
+                {
                     self.editing_index = Some(index);
                     self.toggle_create(); // Open the popup
                 }
@@ -578,9 +592,11 @@ impl App<'_> {
                 let selected_item = filtered_items[selected];
 
                 // Find the index in the original items to compare
-                if let Some(original_index) = self.items.iter().position(|item| {
-                    App::<'_>::item_matches(item, selected_item)
-                }) {
+                if let Some(original_index) = self
+                    .items
+                    .iter()
+                    .position(|item| App::<'_>::item_matches(item, selected_item))
+                {
                     // Update the progress of the original item
                     let item = &mut self.items[original_index];
                     item.progress = match item.progress {
