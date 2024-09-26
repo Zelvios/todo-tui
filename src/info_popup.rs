@@ -11,8 +11,7 @@ pub struct Checkbox {
 #[derive(Default)]
 pub struct InfoPopup<'a> {
     pub title: Line<'a>,
-    pub name: String,
-    pub information: String,
+    pub information: Line<'a>,
     pub checkboxes: Vec<Checkbox>,
     pub selected_checkbox: usize,
     pub style: Style,
@@ -45,7 +44,7 @@ impl InfoPopup<'_> {
         let rows = (self.checkboxes.len() + columns - 1) / columns; // Calculate rows dynamically
         #[allow(clippy::cast_possible_truncation)]
         let checkbox_width = area.width / columns as u16;
-        let checkbox_height: u16 = 3;
+        let checkbox_height: u16 = 1;
 
         // Render the checkboxes
         for (i, checkbox) in self.checkboxes.iter().enumerate() {
@@ -81,7 +80,6 @@ impl InfoPopup<'_> {
             );
         }
 
-        
         #[allow(clippy::cast_possible_truncation)]
         let description_area = Rect::new(
             area.x,
@@ -90,7 +88,13 @@ impl InfoPopup<'_> {
             area.height - (top_offset + 5 + (rows as u16 * (checkbox_height + 1)) + 1),
         );
 
-        Paragraph::new(Text::from(self.information.clone()))
+        // Split the information into spans, each span in information will be on a new line
+        let mut text = Text::default();
+        for span in &self.information.spans {
+            text.lines.push(Line::from(vec![span.clone()]));
+        }
+
+        Paragraph::new(text)
             .wrap(Wrap { trim: true })
             .style(self.style)
             .block(
