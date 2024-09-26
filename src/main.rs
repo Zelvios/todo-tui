@@ -19,6 +19,7 @@ use ratatui::{
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{self, BufReader};
+use ratatui::text::Span;
 use style::palette::tailwind;
 
 const PALETTES: [tailwind::Palette; 4] = [
@@ -155,8 +156,14 @@ impl App<'_> {
             editing_index: None,
             info_popup: InfoPopup {
                 title: Line::from("Rust-Tui"),
-                name: "By: Jacob Jørgensen | Github: Zelvios".to_string(),
-                information: INFO_TEXT.to_string(),
+                information: Line::from(vec![
+                    Span::styled("By: Jacob Jørgensen | Github: Zelvios", Style::default().add_modifier( Modifier::ITALIC)),
+                    Span::from(""),
+                    Span::styled("Commands:", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::from("(I) info | (Esc) quit"),
+                    Span::from("(A) create new todo | (X) delete todo | (R) edit todo"),
+                    Span::from("(↑) move up | (↓) move down | (→) next color | (←) previous color")
+                ]),
                 checkboxes: vec![
                     Checkbox {
                         label: "Hide Completed".to_string(),
@@ -172,7 +179,7 @@ impl App<'_> {
                     },
                 ],
                 style: Style::default().fg(Color::White),
-                selected_checkbox: 0, // Initialize selected checkbox
+                selected_checkbox: 0,
             },
             hide_completed: false,
         }
