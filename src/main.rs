@@ -608,7 +608,7 @@ impl App<'_> {
                 style: Style::default().fg(Color::White),
             };
             create.render(
-                popup_area(area, 80, 30),
+                popup_area(area, area.width / 2, area.height),
                 frame.buffer_mut(),
                 self.input_focus,
                 self.colors.selected_style_fg,
@@ -618,7 +618,7 @@ impl App<'_> {
         // Rendering the info popup
         if self.show_info {
             self.info_popup.render(
-                popup_area(area, 80, 30),
+                popup_area(area, area.width / 2, area.height),
                 frame.buffer_mut(),
                 self.colors.selected_style_fg,
             );

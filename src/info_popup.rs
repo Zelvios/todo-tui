@@ -34,7 +34,7 @@ impl InfoPopup<'_> {
         let big_text = BigText::builder()
             .pixel_size(PixelSize::HalfHeight)
             .style(Style::new().fg(selected_style_fg))
-            .lines(vec!["Todo-Tui".into()])
+            .lines(vec![self.title.clone()])
             .centered()
             .build();
 
