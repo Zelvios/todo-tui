@@ -155,7 +155,7 @@ impl App<'_> {
             input_focus: InputFocus::Name,
             editing_index: None,
             info_popup: InfoPopup {
-                title: Line::from("Rust-TUI"),
+                title: Line::from("Todo-TUI"),
                 information: Line::from(vec![
                     Span::styled(
                         "By: Jacob Jørgensen | Github: Zelvios",
