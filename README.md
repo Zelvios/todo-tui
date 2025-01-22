@@ -3,7 +3,7 @@
 
 A simple Todo app designed with [ratatui.rs](https://ratatui.rs/)
 
-![todo-tui](img.png)
+![design.png](screenshots/design.png)
 ## Development
 
 Clone the Git repository.
